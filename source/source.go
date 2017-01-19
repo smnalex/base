@@ -25,15 +25,15 @@ type SourceFunc func(context.Context, *url.Values) ([]byte, error)
 type Source struct {
 	Client *http.Client
 
-	name     string
-	tag      string
-	Endpoint string
-	Username string
-	Password string
-	Logger   log.Logger
-	Metrics  prometheus.Counter
-	Tracing  interface{}
-	SF       SourceFunc
+	name        string
+	tag         string
+	Endpoint    string
+	Username    string
+	Password    string
+	Logger      log.Logger
+	Metrics     prometheus.Counter
+	Tracing     interface{}
+	RequestFunc SourceFunc
 }
 
 // Get performs and http request to a specified endpoint, with a timeout context
@@ -42,9 +42,8 @@ func (s *Source) Get(ctx context.Context, q *url.Values) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	res, err := s.SF(ctx, q)
+	res, err := s.RequestFunc(ctx, q)
 
-	// Handle common error cases probably use switch type
 	if err != nil {
 		s.Logger.Debug("Failed Request", map[string]interface{}{"err": err, "context": ctx, "urlVal": q})
 		s.Metrics.Inc()
@@ -69,6 +68,7 @@ func defaultSourceRequest(c *http.Client, e string) SourceFunc {
 		if resp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("Invalid request %d", resp.StatusCode)
 		}
+
 		defer resp.Body.Close()
 		return ioutil.ReadAll(resp.Body)
 	}
@@ -76,13 +76,13 @@ func defaultSourceRequest(c *http.Client, e string) SourceFunc {
 
 // NewSource creates a basic source
 func NewSource(name, tag, endpoint string) *Source {
-	df := defaultClient()
+	dC := defaultClient()
 	return &Source{
-		name:     name,
-		tag:      tag,
-		Endpoint: endpoint,
-		Client:   df,
-		SF:       defaultSourceRequest(df, endpoint),
+		name:        name,
+		tag:         tag,
+		Endpoint:    endpoint,
+		Client:      dC,
+		RequestFunc: defaultSourceRequest(dC, endpoint),
 	}
 }
 
@@ -106,8 +106,8 @@ func (s *Source) SetAuth(username, password string) {
 type SourceOption func(*Source)
 
 func (s *Source) SetOptions(ops ...SourceOption) {
-	for _, e := range ops {
-		e(s)
+	for _, opFunc := range ops {
+		opFunc(s)
 	}
 }
 
@@ -136,5 +136,12 @@ func SetTracer(t log.Logger) SourceOption {
 func SetClient(c *http.Client) SourceOption {
 	return func(source *Source) {
 		source.Client = c
+	}
+}
+
+// SetSourceFunc returns a SourceOption which can be added on the source
+func SetSourceFunc(reqFunc SourceFunc) SourceOption {
+	return func(source *Source) {
+		source.RequestFunc = reqFunc
 	}
 }

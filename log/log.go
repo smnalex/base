@@ -30,14 +30,14 @@ func (l *logst) Debug(msg string, context map[string]interface{}) {
 }
 
 func (l *logst) logMarsh(lvl, msg string, ctx map[string]interface{}) {
-	json, err := json.Marshal(struct {
+	jsonMessage, err := json.Marshal(struct {
 		Lvl string                 `json:"lvl"`
 		Msg string                 `json:"msg"`
 		Ctx map[string]interface{} `json:"context"`
 	}{lvl, msg, ctx})
 
 	if err == nil {
-		l.Printf(string(json))
+		l.Printf(string(jsonMessage))
 	} else {
 		l.Printf("unable to marshal log entry: %v", err)
 	}
