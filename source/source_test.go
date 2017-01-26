@@ -10,7 +10,7 @@ func TestSource(t *testing.T) {
 	tag := "tag"
 	url := "http://url.com"
 
-	nts := NewSource(name, tag, url)
+	nts := New(name, tag, url)
 
 	t.Run("Source has correct name, tag, endpoint", func(t *testing.T) {
 		if nts.name != name || nts.tag != tag || nts.Endpoint != url {

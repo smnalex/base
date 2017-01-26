@@ -1,88 +1,51 @@
 package source
 
-// Do not change!!! change only when you find something stupid ;)
-
 import (
 	"context"
-	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
-
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/smnalex/base/log"
 )
 
 type Sourcer interface {
-	Get(context.Context, *url.Values) ([]byte, error)
+	Query(context.Context, *Request) ([]byte, error)
 }
 
-// Sourcer an interface to be implemented by a data source
-type SourceFunc func(context.Context, *url.Values) ([]byte, error)
+type SourceFunc func(context.Context, *Request) ([]byte, error)
 
 // Source representes a data source
 type Source struct {
-	Client *http.Client
+	Name string
+	Tag  string
 
-	name        string
-	tag         string
-	Endpoint    string
-	Username    string
-	Password    string
-	Logger      log.Logger
-	Metrics     prometheus.Counter
-	Tracing     interface{}
+	Client      *http.Client
+	Request     *Request
 	RequestFunc SourceFunc
+	Logger      log.Logger
 }
 
-// Get performs and http request to a specified endpoint, with a timeout context
-// of 5 Second by default
-func (s *Source) Get(ctx context.Context, q *url.Values) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	res, err := s.RequestFunc(ctx, q)
-
-	if err != nil {
-		s.Logger.Debug("Failed Request", map[string]interface{}{"err": err, "context": ctx, "urlVal": q})
-		s.Metrics.Inc()
-		return nil, err
-	}
-	return res, nil
-}
-
-func defaultSourceRequest(c *http.Client, e string) SourceFunc {
-	return func(ctx context.Context, q *url.Values) ([]byte, error) {
-		req, err := http.NewRequest("GET", e, nil)
-		if err != nil {
-			return nil, err
-		}
-
-		req = req.WithContext(ctx)
-		resp, err := c.Do(req)
-		if err != nil {
-			return nil, err
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("Invalid request %d", resp.StatusCode)
-		}
-
-		defer resp.Body.Close()
-		return ioutil.ReadAll(resp.Body)
-	}
+type Request struct {
+	Method   string
+	URL      *url.URL
+	Headers  map[string]string
+	Body     string
+	Username string
+	Password string
 }
 
 // NewSource creates a basic source
-func NewSource(name, tag, endpoint string) *Source {
-	dC := defaultClient()
+func New(name, tag, endpoint string) *Source {
+	dc := defaultClient()
+	dr := defautRequest(endpoint)
 	return &Source{
-		name:        name,
-		tag:         tag,
-		Endpoint:    endpoint,
-		Client:      dC,
-		RequestFunc: defaultSourceRequest(dC, endpoint),
+		Name:        name,
+		Tag:         tag,
+		Client:      dc,
+		RequestFunc: defaultSourceRequest(dc),
+		Request:     dr,
 	}
 }
 
@@ -96,10 +59,53 @@ func defaultClient() *http.Client {
 	}
 }
 
-// SetAuth used by a request when basic auth is needed
-func (s *Source) SetAuth(username, password string) {
-	s.Username = username
-	s.Password = password
+func defautRequest(endpoint string) *Request {
+	url, err := url.Parse(endpoint)
+	if err != nil {
+		panic(err)
+	}
+	return &Request{
+		Method: "GET",
+		URL:    url,
+		Headers: map[string]string{
+			"Accept":       "application/json",
+			"Content-Type": "application/json",
+		},
+	}
+}
+
+// Get performs and http request to a specified URL, with a timeout context
+// of 5 Second by default
+func (s *Source) Query(ctx context.Context, req *Request) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	return s.RequestFunc(ctx, req)
+}
+
+func defaultSourceRequest(c *http.Client) SourceFunc {
+	return func(ctx context.Context, request *Request) ([]byte, error) {
+		req, err := http.NewRequest(request.Method, request.URL.String(), strings.NewReader(request.Body))
+		if err != nil {
+			return nil, err
+		}
+
+		if request.Password != "" && request.Username != "" {
+			req.SetBasicAuth(request.Username, request.Password)
+		}
+
+		for k, v := range request.Headers {
+			req.Header.Add(k, v)
+		}
+
+		resp, err := c.Do(req.WithContext(ctx))
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+
+		return ioutil.ReadAll(resp.Body)
+	}
 }
 
 // SetOpts adds custom logger, metrics
@@ -111,35 +117,35 @@ func (s *Source) SetOptions(ops ...SourceOption) {
 	}
 }
 
-// SetLogger returns a SourceOption which can be added on the source
+// SetBasicAuth returns a SourceOption which can be added on a source
+func SetBasicAuth(username, password string) SourceOption {
+	return func(source *Source) {
+		source.Request.Username = username
+		source.Request.Password = password
+	}
+}
+
+func SetHeaders(headers map[string]string) SourceOption {
+	return func(source *Source) {
+		source.Request.Headers = headers
+	}
+}
+
+// SetLogger returns a SourceOption which can be added on a source
 func SetLogger(l log.Logger) SourceOption {
 	return func(source *Source) {
 		source.Logger = l
 	}
 }
 
-// SetMetric returns a SourceOption which can be added on the source
-func SetMetrics(m prometheus.Counter) SourceOption {
-	return func(source *Source) {
-		source.Metrics = m
-	}
-}
-
-// SetTracer returns a SourceOption which can be added on the source
-func SetTracer(t log.Logger) SourceOption {
-	return func(source *Source) {
-		source.Tracing = t
-	}
-}
-
-// SetClient returns a SourceOption which can be added on the source
+// SetClient returns a SourceOption which can be added on a source
 func SetClient(c *http.Client) SourceOption {
 	return func(source *Source) {
 		source.Client = c
 	}
 }
 
-// SetSourceFunc returns a SourceOption which can be added on the source
+// SetSourceFunc returns a SourceOption which can be added on a source
 func SetSourceFunc(reqFunc SourceFunc) SourceOption {
 	return func(source *Source) {
 		source.RequestFunc = reqFunc
