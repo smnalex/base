@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 )
 
@@ -85,7 +84,7 @@ func (s *Source) Query(ctx context.Context, req *Request) ([]byte, error) {
 
 func defaultSourceRequest(c *http.Client) SourceFunc {
 	return func(ctx context.Context, request *Request) ([]byte, error) {
-		req, err := http.NewRequest(request.Method, request.URL.String(), strings.NewReader(request.Body))
+		req, err := http.NewRequest(request.Method, request.URL.String(), nil)
 		if err != nil {
 			return nil, err
 		}

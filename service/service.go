@@ -1,7 +1,9 @@
 package service
 
 import (
-	"github.com/smnalex/base/log"
+	"log"
+	"sync"
+
 	"github.com/smnalex/base/source"
 )
 
@@ -9,7 +11,8 @@ import (
 type Service struct {
 	name    string
 	tag     string
-	Sources map[string]source.Sourcer
+	Sources map[string]*source.Source
+	sync.Mutex
 	Logging log.Logger
 }
 
@@ -25,11 +28,13 @@ func (s *Service) Logger() log.Logger {
 
 // RegisterSources register all the sources for a service
 // a source must be of type source.Sourcer(implements a Get method)
-func (s *Service) RegisterSources(sources map[string]source.Sourcer) {
+func (s *Service) RegisterSources(sources map[string]*source.Source) {
 	s.Sources = sources
 }
 
 // GetSource returns a source from the service
-func (s *Service) GetSource(name string) source.Sourcer {
+func (s *Service) GetSource(name string) *source.Source {
+	s.Lock()
+	defer s.Unlock()
 	return s.Sources[name]
 }
